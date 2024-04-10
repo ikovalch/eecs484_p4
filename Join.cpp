@@ -14,7 +14,9 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel,
 	vector<Bucket> partitions(MEM_SIZE_IN_PAGE - 1, Bucket(disk)); 
 	// Partitioning the left relation
     for (uint page_id = left_rel.first; page_id <= left_rel.second; ++page_id) {
-        auto tempPage = mem->loadFromDisk(disk, page_id, 0);
+        mem->reset();
+		mem->loadFromDisk(disk, page_id, 0);
+		auto tempPage = mem->mem_page(0);
         for (uint i = 0; i < tempPage->size(); ++i) {
             Record r = tempPage->get_record(i);
             uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
@@ -42,5 +44,18 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel,
 vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 	// TODO: implement probe phase
 	vector<uint> disk_pages; // placeholder
+	 for (Bucket& bucket : partitions) {
+        unordered_map<uint, vector<Record>> hash_table; // In-memory hash table
+
+        // Building hash table for left relation records in this bucket
+        for (uint page_id : bucket.get_left_rel()) {
+            mem->loadFromDisk(disk, page_id, 0); // Assuming memory page 0 is used for temporary storage
+            Page* page = mem->mem_page(0);
+            for (uint i = 0; i < page->size(); ++i) {
+                Record r = page->get_record(i);
+                uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+                hash_table[hash_value].push_back(r);
+            }
+        }
 	return disk_pages;
 }
