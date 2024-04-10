@@ -1,6 +1,7 @@
 #include "Join.hpp"
 
 #include <vector>
+#include <unordered_map>
 
 using namespace std;
 
@@ -44,6 +45,7 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel,
 vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 	// TODO: implement probe phase
 	vector<uint> disk_pages; // placeholder
+	// let us assume we use the last page
 	 for (Bucket& bucket : partitions) {
         unordered_map<uint, vector<Record>> hash_table; // In-memory hash table
 
@@ -57,5 +59,30 @@ vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
                 hash_table[hash_value].push_back(r);
             }
         }
+		  // Probing hash table with records from the right relation
+        for (uint page_id : bucket.get_right_rel()) {
+            mem->loadFromDisk(disk, page_id, 1); // Assuming memory page 1 is used here
+            Page* page = mem->mem_page(1);
+            for (uint i = 0; i < page->size(); ++i) {
+                Record r = page->get_record(i);
+                uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+                if (hash_table.find(hash_value) != hash_table.end()) {
+                    for (Record& left_record : hash_table[hash_value]) {
+                        if (left_record == r) {
+                            // When a match is found, create or use a result page in memory to store the join result
+                            // You might need to flush this page to disk if it's full, and then start a new page
+                            // Keep track of the disk page IDs where the join results are stored
+							Page* resultPage = mem->mem_page(MEM_SIZE_IN_PAGE - 1);
+							if (resultPage->full()){
+								uint disk_id = mem->flushToDisk(disk, MEM_SIZE_IN_PAGE - 1);
+								disk_pages.push_back(disk_id);
+							}
+							resultPage->loadPair(left_record, r);
+                        }
+                    }
+                }
+            }
+        }
+    }
 	return disk_pages;
 }
