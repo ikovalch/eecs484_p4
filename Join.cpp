@@ -1,7 +1,8 @@
 #include "Join.hpp"
 
-#include <vector>
+#include <iostream>
 #include <unordered_map>
+#include <vector>
 
 using namespace std;
 
@@ -9,31 +10,72 @@ using namespace std;
  * Input: Disk, Memory, Disk page ids for left relation, Disk page ids for right relation
  * Output: Vector of Buckets of size (MEM_SIZE_IN_PAGE - 1) after partition
  */
-vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel,
-                         pair<uint, uint> right_rel) {
+vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<uint, uint> right_rel) {
 	// TODO: implement partition phase
-	vector<Bucket> partitions(MEM_SIZE_IN_PAGE - 1, Bucket(disk)); 
-	// Partitioning the left relation
-    for (uint page_id = left_rel.first; page_id <= left_rel.second; ++page_id) {
-        mem->reset();
+	vector<Bucket> partitions(MEM_SIZE_IN_PAGE - 1, Bucket(disk));
+	// partitioning left
+	// MEM_SIZE_IN_PAGE - 1 is 15
+	//cout << "LEFT" << endl; //DEBUGGING
+
+	for (uint page_id = left_rel.first; page_id < left_rel.second; ++page_id) {
+
 		mem->loadFromDisk(disk, page_id, 0);
 		auto tempPage = mem->mem_page(0);
-        for (uint i = 0; i < tempPage->size(); ++i) {
-            Record r = tempPage->get_record(i);
-            uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
-            partitions[bucket_idx].add_left_rel_page(page_id);
-        }
-    }
-	// Partitioning the right relation
-    for (uint page_id = right_rel.first; page_id <= right_rel.second; ++page_id) {
-        mem->loadFromDisk(disk, page_id, 0); // Reusing memory page 0
-        Page* tempPage = mem->mem_page(0);
-        for (uint i = 0; i < tempPage->size(); ++i) {
-            Record r = tempPage->get_record(i);
-            uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
-            partitions[bucket_idx].add_right_rel_page(page_id);
-        }
-    }
+
+		for (uint i = 0; i < tempPage->size(); ++i) {
+			Record r = tempPage->get_record(i);
+			uint bucket_idx = r.partition_hash()
+			        % (MEM_SIZE_IN_PAGE - 1); //do we have to account for the fact that this may be 0?
+			auto assignmentPage = mem->mem_page(bucket_idx);
+
+			if (assignmentPage->full()) { // once full, flush to disk
+				uint disk_id = mem->flushToDisk(disk, bucket_idx);
+				partitions[bucket_idx].add_left_rel_page(disk_id); //disk id of that bucket page
+			}
+
+			assignmentPage->loadRecord(r); // put that record onto that page(loadRecord)
+
+			//cout << bucket_idx << endl; //DEBUGGING
+			//r.print();                  //DEBUGGING
+		}
+	}
+	for (uint i = 1; i < MEM_SIZE_IN_PAGE - 1; i++) {
+		uint disk_id = mem->flushToDisk(disk, i);
+		partitions[i].add_left_rel_page(disk_id); //disk id of that bucket page
+	}                                             //flush all of mem to disk
+	mem->reset();
+
+	// partitioning right
+	//cout << "RIGHT" << endl; //DEBUGGING
+	for (uint page_id = right_rel.first; page_id < right_rel.second; ++page_id) {
+
+		mem->loadFromDisk(disk, page_id, 0); // reusing memory page 0
+		Page* tempPage = mem->mem_page(0);   // get pointer to page 0
+
+		for (uint i = 0; i < tempPage->size(); ++i) {
+			Record r = tempPage->get_record(i);
+			uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
+			auto assignmentPage = mem->mem_page(bucket_idx);
+
+			if (assignmentPage->full()) { // once full, flush to disk
+				uint disk_id = mem->flushToDisk(disk, bucket_idx);
+				partitions[bucket_idx].add_right_rel_page(disk_id); //disk id of that bucket page
+			}
+
+			assignmentPage->loadRecord(r); // put that record onto that page(loadRecord)
+
+			//cout << bucket_idx << endl; //DEBUGGING
+			//r.print();                  //DEBUGGING
+		}
+	}
+
+	for (uint i = 1; i < MEM_SIZE_IN_PAGE - 1; i++) {
+		uint disk_id = mem->flushToDisk(disk, i);
+		partitions[i].add_right_rel_page(disk_id); //disk id of that bucket page
+
+	} //flush all of mem to disk
+
+	mem->reset();
 
 	return partitions;
 }
@@ -45,44 +87,74 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel,
 vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 	// TODO: implement probe phase
 	vector<uint> disk_pages; // placeholder
-	// let us assume we use the last page
-	 for (Bucket& bucket : partitions) {
-        unordered_map<uint, vector<Record>> hash_table; // In-memory hash table
+	                         // let us assume we use the last page
+	for (Bucket& bucket : partitions) {
+		unordered_map<uint, vector<Record>> hash_table;
+		// check which side of the partition is smaller, hash table should get the smaller of the two
+		// hash the left relation with h2
+		vector<uint> value;
+		if (bucket.get_left_rel() < bucket.get_right_rel()) {
+			value = bucket.get_right_rel();
+			for (uint page_id : bucket.get_left_rel()) {
+				mem->loadFromDisk(disk, page_id, 0);      // mem page 0 for temp storage
+				Page* page = mem->mem_page(0);            // get pointer to the page
+				for (uint i = 0; i < page->size(); ++i) { // loop through all page records
+					Record r = page->get_record(i);
+					uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+					hash_table[hash_value].push_back(r);
+				}
+			}
+		} else {
+			value = bucket.get_left_rel();
+			for (uint page_id : bucket.get_right_rel()) {
+				mem->loadFromDisk(disk, page_id, 0);      // mem page 0 for temp storage
+				Page* page = mem->mem_page(0);            // get pointer to the page
+				for (uint i = 0; i < page->size(); ++i) { // loop through all page records
+					Record r = page->get_record(i);
+					uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+					hash_table[hash_value].push_back(r);
+				}
+			}
+		}
+		// probe hash table with records from the opposite relation
+		int counter = 2;
 
-        // Building hash table for left relation records in this bucket
-        for (uint page_id : bucket.get_left_rel()) {
-            mem->loadFromDisk(disk, page_id, 0); // Assuming memory page 0 is used for temporary storage
-            Page* page = mem->mem_page(0);
-            for (uint i = 0; i < page->size(); ++i) {
-                Record r = page->get_record(i);
-                uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
-                hash_table[hash_value].push_back(r);
-            }
-        }
-		  // Probing hash table with records from the right relation
-        for (uint page_id : bucket.get_right_rel()) {
-            mem->loadFromDisk(disk, page_id, 1); // Assuming memory page 1 is used here
-            Page* page = mem->mem_page(1);
-            for (uint i = 0; i < page->size(); ++i) {
-                Record r = page->get_record(i);
-                uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
-                if (hash_table.find(hash_value) != hash_table.end()) {
-                    for (Record& left_record : hash_table[hash_value]) {
-                        if (left_record == r) {
-                            // When a match is found, create or use a result page in memory to store the join result
-                            // You might need to flush this page to disk if it's full, and then start a new page
-                            // Keep track of the disk page IDs where the join results are stored
-							Page* resultPage = mem->mem_page(MEM_SIZE_IN_PAGE - 1);
-							if (resultPage->full()){
-								uint disk_id = mem->flushToDisk(disk, MEM_SIZE_IN_PAGE - 1);
+		for (uint page_id : value) {
+			mem->loadFromDisk(disk, page_id, 1); // mem page 1 for temp storage
+			Page* page = mem->mem_page(1);
+			for (uint i = 0; i < page->size(); ++i) {
+				Record r = page->get_record(i);
+				uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+				if (hash_table.find(hash_value) != hash_table.end()) { // found a match
+					//cout << "FOUND A MATCH" << endl;
+					for (Record& my_record : hash_table[hash_value]) {
+						if (my_record == r) {
+							//cout << "JOIN THESE" << endl;
+							// create or use a result page in memory to store the join result
+							Page* resultPage = mem->mem_page(counter);
+							if (resultPage->full()) {
+								//cout << "page is full" << endl;
+								uint disk_id = mem->flushToDisk(disk, counter);
 								disk_pages.push_back(disk_id);
+
+								counter++;
 							}
-							resultPage->loadPair(left_record, r);
-                        }
-                    }
-                }
-            }
-        }
-    }
+							resultPage->loadPair(my_record, r);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	//gotta flush even if its not full
+	for (uint i = 2; i < MEM_SIZE_IN_PAGE - 1; i++) {
+		if (!(mem->mem_page(i)->empty())) {
+			//cout << "FLUSHED !" << endl;
+			uint disk_id = mem->flushToDisk(disk, i);
+			disk_pages.push_back(disk_id);
+		}
+	}
+	mem->reset();
 	return disk_pages;
 }
