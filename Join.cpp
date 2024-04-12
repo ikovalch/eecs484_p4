@@ -24,8 +24,8 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 
 		for (uint i = 0; i < tempPage->size(); ++i) {
 			Record r = tempPage->get_record(i);
-			uint bucket_idx = r.partition_hash()
-			        % (MEM_SIZE_IN_PAGE - 1); //do we have to account for the fact that this may be 0?
+			uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1)
+			        + 1; //do we have to account for the fact that this may be 0?
 			auto assignmentPage = mem->mem_page(bucket_idx);
 
 			if (assignmentPage->full()) { // once full, flush to disk
@@ -54,7 +54,7 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 
 		for (uint i = 0; i < tempPage->size(); ++i) {
 			Record r = tempPage->get_record(i);
-			uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1);
+			uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1) + 1;
 			auto assignmentPage = mem->mem_page(bucket_idx);
 
 			if (assignmentPage->full()) { // once full, flush to disk
@@ -93,14 +93,14 @@ vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 		// check which side of the partition is smaller, hash table should get the smaller of the two
 		// hash the left relation with h2
 		vector<uint> value;
-		if (bucket.get_left_rel() < bucket.get_right_rel()) {
+		if (bucket.get_left_rel().size() < bucket.get_right_rel().size()) {
 			value = bucket.get_right_rel();
 			for (uint page_id : bucket.get_left_rel()) {
 				mem->loadFromDisk(disk, page_id, 0);      // mem page 0 for temp storage
 				Page* page = mem->mem_page(0);            // get pointer to the page
 				for (uint i = 0; i < page->size(); ++i) { // loop through all page records
 					Record r = page->get_record(i);
-					uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+					uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2) + 2;
 					hash_table[hash_value].push_back(r);
 				}
 			}
@@ -111,7 +111,7 @@ vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 				Page* page = mem->mem_page(0);            // get pointer to the page
 				for (uint i = 0; i < page->size(); ++i) { // loop through all page records
 					Record r = page->get_record(i);
-					uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+					uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2) + 2;
 					hash_table[hash_value].push_back(r);
 				}
 			}
@@ -124,7 +124,7 @@ vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 			Page* page = mem->mem_page(1);
 			for (uint i = 0; i < page->size(); ++i) {
 				Record r = page->get_record(i);
-				uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2);
+				uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2) + 2;
 				if (hash_table.find(hash_value) != hash_table.end()) { // found a match
 					//cout << "FOUND A MATCH" << endl;
 					for (Record& my_record : hash_table[hash_value]) {
