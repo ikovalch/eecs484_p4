@@ -15,11 +15,11 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 	vector<Bucket> partitions(MEM_SIZE_IN_PAGE - 1, Bucket(disk));
 	// partitioning left
 	// MEM_SIZE_IN_PAGE - 1 is 15
-	//cout << "LEFT" << endl; //DEBUGGING
+	cout << "LEFT" << endl; //DEBUGGING
 
 	for (uint page_id = left_rel.first; page_id < left_rel.second; ++page_id) {
 
-		mem->loadFromDisk(disk, page_id, 0);
+		mem->loadFromDisk(disk, page_id, 0); //using the last page in memory as temp
 		auto tempPage = mem->mem_page(0);
 
 		for (uint i = 0; i < tempPage->size(); ++i) {
@@ -27,28 +27,26 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 			uint bucket_idx = r.partition_hash() % (MEM_SIZE_IN_PAGE - 1)
 			        + 1; //do we have to account for the fact that this may be 0?
 			auto assignmentPage = mem->mem_page(bucket_idx);
-
-			if (assignmentPage->full()) { // once full, flush to disk
+			assignmentPage->loadRecord(r); // put that record onto that page(loadRecord)
+			if (assignmentPage->full()) {  // once full, flush to disk
 				uint disk_id = mem->flushToDisk(disk, bucket_idx);
 				partitions[bucket_idx - 1].add_left_rel_page(disk_id); //disk id of that bucket page
 			}
-
-			assignmentPage->loadRecord(r); // put that record onto that page(loadRecord)
-
-			//cout << bucket_idx << endl; //DEBUGGING
-			//r.print();                  //DEBUGGING
+			cout << bucket_idx << endl; //DEBUGGING
+			r.print();                  //DEBUGGING
 		}
+		tempPage->reset();
 	}
-	for (uint i = 1; i < MEM_SIZE_IN_PAGE - 1; i++) {
+	for (uint i = 1; i <= MEM_SIZE_IN_PAGE - 1; i++) {
 		if (!(mem->mem_page(i)->empty())) {
 			uint disk_id = mem->flushToDisk(disk, i);
-			partitions[i].add_left_rel_page(disk_id); //disk id of that bucket page
+			partitions[i - 1].add_left_rel_page(disk_id); //disk id of that bucket page
 		}
 	} //flush all of mem (that is not empty) to disk
 	//mem->reset();
 
 	// partitioning right
-	//cout << "RIGHT" << endl; //DEBUGGING
+	cout << "RIGHT" << endl; //DEBUGGING
 	for (uint page_id = right_rel.first; page_id < right_rel.second; ++page_id) {
 
 		mem->loadFromDisk(disk, page_id, 0); // reusing memory page 0
@@ -66,20 +64,18 @@ vector<Bucket> partition(Disk* disk, Mem* mem, pair<uint, uint> left_rel, pair<u
 
 			assignmentPage->loadRecord(r); // put that record onto that page(loadRecord)
 
-			//cout << bucket_idx << endl; //DEBUGGING
-			//r.print();                  //DEBUGGING
+			cout << bucket_idx << endl; //DEBUGGING
+			r.print();                  //DEBUGGING
 		}
+		tempPage->reset();
 	}
 
-	for (uint i = 1; i < MEM_SIZE_IN_PAGE - 1; i++) {
+	for (uint i = 1; i <= MEM_SIZE_IN_PAGE - 1; i++) {
 		if (!(mem->mem_page(i)->empty())) {
 			uint disk_id = mem->flushToDisk(disk, i);
-			partitions[i].add_right_rel_page(disk_id); //disk id of that bucket page
+			partitions[i - 1].add_right_rel_page(disk_id); //disk id of that bucket page
 		}
 	} //flush all of mem (that is not empty) to disk
-
-	//mem->reset();
-
 	return partitions;
 }
 
@@ -130,11 +126,11 @@ vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 				uint hash_value = r.probe_hash() % (MEM_SIZE_IN_PAGE - 2) + 2;
 				for (uint i = 0; i < mem->mem_page(hash_value)->size(); i++) {
 					if (mem->mem_page(hash_value)->get_record(i) == r) {
-						//cout << "JOIN THESE" << endl;
+						cout << "JOIN THESE" << endl;
 						// create or use a result page in memory to store the join result
 						Page* resultPage = mem->mem_page(0);
 						if (resultPage->full()) {
-							//cout << "page is full" << endl;
+							cout << "page is full" << endl;
 							uint disk_id = mem->flushToDisk(disk, 0);
 							disk_pages.push_back(disk_id);
 						}
@@ -147,7 +143,7 @@ vector<uint> probe(Disk* disk, Mem* mem, vector<Bucket>& partitions) {
 
 	//gotta flush even if its not full
 	if (!(mem->mem_page(0)->empty())) {
-		//cout << "FLUSHED !" << endl;
+		cout << "FLUSHED !" << endl;
 		uint disk_id = mem->flushToDisk(disk, 0);
 		disk_pages.push_back(disk_id);
 	}
